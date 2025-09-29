@@ -20,8 +20,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-from test_project.settings import get_secret
-SECRET_KEY = get_secret('SECRET_KEY')
+SECRET_KEY = "django-insecure-h$&d*fm88y0+=ab7)(e-9uit6_al!^v6_gub3p%+atf%jor$+i"
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
@@ -34,6 +33,8 @@ ALLOWED_HOSTS = ['*']
 INSTALLED_APPS = [
     'users.apps.UsersConfig',
     'blog.apps.BlogConfig',
+    'crispy_forms',
+    'crispy_bootstrap4',
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -44,6 +45,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -118,9 +120,53 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
 
-STATIC_URL = "static/"
+STATIC_URL = '/static/'
+STATIC_ROOT = '/app/staticfiles'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Crispy forms configuration
+CRISPY_TEMPLATE_PACK = 'bootstrap4'
+
+# Login/Logout URLs
+LOGIN_REDIRECT_URL = 'blog-home'
+LOGIN_URL = 'login'
+LOGOUT_REDIRECT_URL = 'blog-home'
+
+# CSRF trusted origins
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:8080', 
+    'http://127.0.0.1:8080',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000'
+]
+
+# Add logging configuration for better debugging
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
+
+# Media files
+MEDIA_URL = '/media/'
+MEDIA_ROOT = '/app/media'
