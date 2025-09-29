@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: django-app
+  labels:
+    app: django-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: django-app
+  template:
+    metadata:
+      labels:
+        app: django-app
+    spec:
+      containers:
+      - name: mycontainer
+        image: django_image:v2
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DJANGO_SETTINGS_MODULE
+          value: "test_project.settings.production"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: django-service
+spec:
+  selector:
+    app: django-app
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+  type: ClusterIP
