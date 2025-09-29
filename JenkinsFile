@@ -99,8 +99,7 @@ pipeline {
                 dir('test_project') {
                     script {
                         sh """
-                            sed -i.bak 's|image: .*django.*:.*|image: ${DOCKER_IMAGE}:v2|g' k8s/django-deployment.yaml || \
-                            sed -i.bak 's|image: .*django.*:.*|image: ${DOCKER_IMAGE}:v2|g' django-deployment.yaml
+                            sed -i.bak 's|image: .*django.*:.*|image: ${DOCKER_IMAGE}:v2|g' deployement.yaml
                         """
                     }
                 }
@@ -114,7 +113,7 @@ pipeline {
                     script {
                         try {
                             sh 'kubectl config use-context kind-django-cluster'
-                            sh 'kubectl apply -f k8s/ || kubectl apply -f django-deployment.yaml'
+                            sh 'kubectl apply -f deployement.yaml'
                         } catch (Exception e) {
                             echo "Deployment failed: ${e.getMessage()}"
                             error("Kubernetes deployment failed")
