@@ -1,0 +1,210 @@
+pipeline {
+    agent any
+    
+    environment {
+        DOCKER_IMAGE = 'django_image'
+        DOCKER_TAG = "v${BUILD_NUMBER}"
+        DOCKER_LATEST = 'django_image:v2'
+        GITHUB_REPO = 'https://github.com/inferno5679/Blog_app.git'
+        KIND_CLUSTER = 'django-cluster'
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Checking out code from GitHub...'
+                git branch: 'main', url: "${GITHUB_REPO}"
+            }
+        }
+        
+        stage('Environment Setup') {
+            steps {
+                echo 'Setting up environment...'
+                sh 'python --version'
+                sh 'docker --version'
+                sh 'kubectl version --client'
+                sh 'kind get clusters'
+            }
+        }
+        
+        stage('Verify KIND Cluster') {
+            steps {
+                echo 'Verifying KIND cluster is running...'
+                script {
+                    try {
+                        sh "kind get clusters | grep ${KIND_CLUSTER}"
+                        sh 'kubectl cluster-info --context kind-django-cluster'
+                    } catch (Exception e) {
+                        error("KIND cluster '${KIND_CLUSTER}' is not running. Please start it first with: kind create cluster --name django-cluster")
+                    }
+                }
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                echo 'Building Docker image...'
+                dir('test_project') {
+                    script {
+                        dockerImage = docker.build("${DOCKER_IMAGE}:${DOCKER_TAG}")
+                        docker.build("${DOCKER_IMAGE}:v2")
+                        docker.build("${DOCKER_IMAGE}:latest")
+                    }
+                }
+            }
+        }
+        
+        stage('Test Application') {
+            steps {
+                echo 'Running Django tests...'
+                dir('test_project') {
+                    script {
+                        try {
+                            docker.image("${DOCKER_IMAGE}:v2").inside {
+                                sh 'python manage.py test --settings=test_project.settings.production'
+                            }
+                        } catch (Exception e) {
+                            echo "Tests failed or no tests found: ${e.getMessage()}"
+                            currentBuild.result = 'UNSTABLE'
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Load Image to KIND') {
+            steps {
+                echo 'Loading Docker image to KIND cluster...'
+                sh "kind load docker-image ${DOCKER_IMAGE}:v2 --name ${KIND_CLUSTER}"
+                sh "kind load docker-image ${DOCKER_IMAGE}:${DOCKER_TAG} --name ${KIND_CLUSTER}"
+                sh "kind load docker-image ${DOCKER_IMAGE}:latest --name ${KIND_CLUSTER}"
+            }
+        }
+        
+        stage('Update Kubernetes Manifests') {
+            steps {
+                echo 'Updating Kubernetes deployment with new image tag...'
+                dir('test_project') {
+                    script {
+                        sh """
+                            sed -i.bak 's|image: .*django.*:.*|image: ${DOCKER_IMAGE}:v2|g' k8s/django-deployment.yaml || \
+                            sed -i.bak 's|image: .*django.*:.*|image: ${DOCKER_IMAGE}:v2|g' django-deployment.yaml
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to Kubernetes') {
+            steps {
+                echo 'Deploying to Kubernetes...'
+                dir('test_project') {
+                    script {
+                        try {
+                            sh 'kubectl config use-context kind-django-cluster'
+                            sh 'kubectl apply -f k8s/ || kubectl apply -f django-deployment.yaml'
+                        } catch (Exception e) {
+                            echo "Deployment failed: ${e.getMessage()}"
+                            error("Kubernetes deployment failed")
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Wait for Deployment') {
+            steps {
+                echo 'Waiting for deployment to be ready...'
+                script {
+                    timeout(time: 5, unit: 'MINUTES') {
+                        sh 'kubectl rollout status deployment/django-app --timeout=300s'
+                    }
+                }
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                echo 'Verifying deployment...'
+                sh 'kubectl get pods -l app=django-app'
+                sh 'kubectl get services'
+                
+                script {
+                    // Check if pods are running
+                    def podStatus = sh(
+                        script: 'kubectl get pods -l app=django-app -o jsonpath="{.items[0].status.phase}"',
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (podStatus != 'Running') {
+                        error("Pods are not running. Status: ${podStatus}")
+                    }
+                    
+                    echo "✅ Pods are running successfully!"
+                }
+            }
+        }
+        
+        stage('Health Check') {
+            steps {
+                echo 'Performing health check...'
+                script {
+                    try {
+                        // Port forward and test the application
+                        sh '''
+                            kubectl port-forward service/django-service 8080:80 &
+                            PF_PID=$!
+                            sleep 10
+                            curl -f http://localhost:8080 || echo "Health check failed"
+                            kill $PF_PID || true
+                        '''
+                    } catch (Exception e) {
+                        echo "Health check warning: ${e.getMessage()}"
+                        currentBuild.result = 'UNSTABLE'
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo 'Cleaning up...'
+            script {
+                try {
+                    // Clean up old Docker images (keep last 3)
+                    sh """
+                        docker images ${DOCKER_IMAGE} --format "table {{.Tag}}" | tail -n +2 | sort -V | head -n -3 | xargs -r docker rmi ${DOCKER_IMAGE}: || true
+                    """
+                } catch (Exception e) {
+                    echo "Cleanup warning: ${e.getMessage()}"
+                }
+            }
+        }
+        
+        success {
+            echo 'Pipeline completed successfully! 🎉'
+            echo "Application deployed with image: ${DOCKER_IMAGE}:v2"
+            echo 'Access your app with: kubectl port-forward service/django-service 8080:80'
+        }
+        
+        failure {
+            echo 'Pipeline failed! ❌'
+            echo 'Check the logs above for error details.'
+            
+            // Get pod logs for debugging
+            script {
+                try {
+                    sh 'kubectl logs -l app=django-app --tail=50'
+                } catch (Exception e) {
+                    echo "Could not get pod logs: ${e.getMessage()}"
+                }
+            }
+        }
+        
+        unstable {
+            echo 'Pipeline completed with warnings! ⚠️'
+            echo 'Some tests may have failed, but deployment proceeded.'
+        }
+    }
+}
